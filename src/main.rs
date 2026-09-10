@@ -1,44 +1,10 @@
 #[allow(dead_code)]
+mod hid;
+#[allow(dead_code)]
 mod protocol;
 
-use rusb::{Context, DeviceHandle, Direction, Recipient, RequestType, UsbContext};
-
-const HID_SET_REPORT: u8 = 0x09;
-
-#[derive(Debug)]
-#[allow(dead_code)]
-enum ReportType {
-    Input = 1,
-    Output = 2,
-    Feature = 3,
-}
-
-fn send_hid_set_report(
-    handle: &mut DeviceHandle<Context>,
-    interface: u8,
-    report_type: ReportType,
-    report_id: u8,
-    data: &[u8],
-) -> rusb::Result<usize> {
-    let bm_request_type =
-        rusb::request_type(Direction::Out, RequestType::Class, Recipient::Interface);
-
-    let w_value = ((report_type as u16) << 8) | (report_id as u16);
-    let w_index = interface as u16;
-
-    println!("bm_request_type: {bm_request_type:#x}");
-    println!("w_value: {w_value:#x}");
-    println!("w_index: {w_index:#x}");
-
-    handle.write_control(
-        bm_request_type,
-        HID_SET_REPORT,
-        w_value,
-        w_index,
-        data,
-        std::time::Duration::from_millis(1000),
-    )
-}
+use hid::HidTransport;
+use rusb::{Context, UsbContext};
 
 #[allow(dead_code)]
 enum LightMode {
@@ -63,17 +29,8 @@ fn main() -> rusb::Result<()> {
             desc.product_id()
         );
         if desc.vendor_id() == vid && desc.product_id() == pid {
-            let mut handle = device.open()?;
-
-            // Some devices already have a kernel driver attached
-            let iface = 0; // usually 0, check your device
-            if handle.kernel_driver_active(iface)? {
-                println!("freeing device!");
-                handle.detach_kernel_driver(iface)?;
-            }
-
+            let mut transport = HidTransport::open(device, interface)?;
             println!("open success!");
-            handle.claim_interface(interface)?;
             println!("device claimed!");
 
             let report_id = 82;
@@ -100,26 +57,8 @@ fn main() -> rusb::Result<()> {
                 0x28, 0x0, 0xff, 0x0, 0x80, 0x5, 0x0,
             ];
 
-            let bytes_written = send_hid_set_report(
-                &mut handle,
-                interface,
-                ReportType::Feature,
-                report_id,
-                &report_data,
-            )?;
-
+            let bytes_written = transport.send_feature_report(report_id, &report_data)?;
             println!("Sent {} bytes via SET_REPORT", bytes_written);
-            // let bytes_written = send_hid_set_report(
-            //     &mut handle,
-            //     interface,
-            //     ReportType::Feature,
-            //     report_id,
-            //     &report_data,
-            // )?;
-
-            // println!("Sent {} bytes via SET_REPORT", bytes_written);
-
-            handle.release_interface(interface)?;
         }
     }
 
