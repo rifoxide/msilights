@@ -3,6 +3,7 @@ use std::fmt;
 #[derive(Debug)]
 pub enum AppError {
     Usb(rusb::Error),
+    Cli(String),
     DeviceNotFound { vendor_id: u16, product_id: u16 },
 }
 
@@ -10,6 +11,7 @@ impl fmt::Display for AppError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Usb(error) => write!(f, "USB error: {error}"),
+            Self::Cli(error) => write!(f, "{error}"),
             Self::DeviceNotFound {
                 vendor_id,
                 product_id,

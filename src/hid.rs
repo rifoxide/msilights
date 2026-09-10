@@ -164,6 +164,7 @@ impl FeatureReportTransport for RecordingTransport {
                     vendor_id: *vendor_id,
                     product_id: *product_id,
                 },
+                AppError::Cli(message) => AppError::Cli(message.clone()),
             });
         }
         self.reports.push((report_id, data.to_vec()));
@@ -181,6 +182,7 @@ impl FeatureReportTransport for RecordingTransport {
                     vendor_id: *vendor_id,
                     product_id: *product_id,
                 },
+                AppError::Cli(message) => AppError::Cli(message.clone()),
             });
         }
         Ok(self.read_data.clone().unwrap_or_default())

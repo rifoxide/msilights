@@ -9,7 +9,8 @@ mod hid;
 mod protocol;
 
 use clap::Parser;
-use cli::Cli;
+use cli::{Cli, Command, apply_set_request, parse_set_command};
+use controller::MsiController;
 use error::AppError;
 use hid::open_matching;
 use rusb::Context;
@@ -23,6 +24,19 @@ enum LightMode {
 
 fn main() -> Result<(), AppError> {
     let cli = Cli::parse();
+    if let Some(Command::Set { dry_run: false, .. }) = &cli.command {
+        let command = cli.command.as_ref().expect("set command was matched");
+        let request = parse_set_command(command).map_err(AppError::Cli)?;
+        let context = Context::new()?;
+        let transport = open_matching(&context, 0)?;
+        let mut controller = MsiController::new(transport);
+        apply_set_request(&mut controller, &request).map_err(AppError::Cli)?;
+        controller
+            .update()
+            .map_err(|error| AppError::Cli(error.to_string()))?;
+        return Ok(());
+    }
+
     if let Some(output) = cli::render(&cli) {
         print!("{output}");
         return Ok(());

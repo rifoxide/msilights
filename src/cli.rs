@@ -2,7 +2,7 @@ use clap::{Parser, Subcommand};
 
 use crate::boards::{BoardCapabilities, COMMON_185_CAPABILITIES, zone_from_name};
 use crate::controller::{MsiController, Zone};
-use crate::hid::RecordingTransport;
+use crate::hid::{FeatureReportTransport, RecordingTransport};
 use crate::protocol::{
     Color, FEATURE_PACKET_LEN, FEATURE_REPORT_ID, MsiBrightness, MsiMode, MsiSpeed,
 };
@@ -139,6 +139,82 @@ fn controller_zone(zone: &str) -> Result<Zone, String> {
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct SetRequest {
+    pub zone: Zone,
+    pub primary: Color,
+    pub secondary: Color,
+    pub effect: MsiMode,
+    pub speed: MsiSpeed,
+    pub brightness: MsiBrightness,
+    pub save: bool,
+}
+
+impl SetRequest {
+    fn parse(
+        zone: &str,
+        color: &str,
+        secondary: Option<&str>,
+        effect: &str,
+        speed: &str,
+        brightness: &str,
+        save: bool,
+    ) -> Result<Self, String> {
+        Ok(Self {
+            zone: controller_zone(zone)?,
+            primary: parse_color(color)?,
+            secondary: parse_color(secondary.unwrap_or(color))?,
+            effect: parse_mode(effect)?,
+            speed: parse_speed(speed)?,
+            brightness: parse_brightness(brightness)?,
+            save,
+        })
+    }
+}
+
+pub fn parse_set_command(command: &Command) -> Result<SetRequest, String> {
+    match command {
+        Command::Set {
+            zone,
+            color,
+            secondary,
+            effect,
+            speed,
+            brightness,
+            save,
+            ..
+        } => SetRequest::parse(
+            zone,
+            color,
+            secondary.as_deref(),
+            effect,
+            speed,
+            brightness,
+            *save,
+        ),
+        _ => Err("expected set command".into()),
+    }
+}
+
+pub fn apply_set_request<T: FeatureReportTransport>(
+    controller: &mut MsiController<T>,
+    request: &SetRequest,
+) -> Result<(), String> {
+    controller
+        .set_colors(request.zone, request.primary, request.secondary)
+        .map_err(|error| error.to_string())?;
+    controller
+        .set_settings(
+            request.zone,
+            request.effect,
+            request.speed,
+            request.brightness,
+        )
+        .map_err(|error| error.to_string())?;
+    controller.set_save(request.save);
+    Ok(())
+}
+
 fn build_set_packet(
     zone: &str,
     color: &str,
@@ -148,22 +224,9 @@ fn build_set_packet(
     brightness: &str,
     save: bool,
 ) -> Result<[u8; FEATURE_PACKET_LEN], String> {
-    let zone = controller_zone(zone)?;
-    let primary = parse_color(color)?;
-    let secondary = parse_color(secondary.unwrap_or(color))?;
+    let request = SetRequest::parse(zone, color, secondary, effect, speed, brightness, save)?;
     let mut controller = MsiController::new(RecordingTransport::default());
-    controller
-        .set_colors(zone, primary, secondary)
-        .map_err(|error| error.to_string())?;
-    controller
-        .set_settings(
-            zone,
-            parse_mode(effect)?,
-            parse_speed(speed)?,
-            parse_brightness(brightness)?,
-        )
-        .map_err(|error| error.to_string())?;
-    controller.set_save(save);
+    apply_set_request(&mut controller, &request)?;
     Ok(controller.packet().encode())
 }
 
@@ -291,6 +354,47 @@ mod tests {
                 command: Some(Command::Effects)
             })
         ));
+    }
+
+    #[test]
+    fn parses_and_applies_set_request_without_hardware() {
+        let command = Cli::try_parse_from([
+            "msilights",
+            "set",
+            "--zone",
+            "JRGB1",
+            "--color",
+            "#102030",
+            "--effect",
+            "breathing",
+            "--speed",
+            "high",
+            "--brightness",
+            "70",
+            "--save",
+            "--dry-run",
+        ])
+        .unwrap()
+        .command
+        .unwrap();
+        let request = parse_set_command(&command).unwrap();
+        let mut controller = MsiController::new(RecordingTransport::default());
+        apply_set_request(&mut controller, &request).unwrap();
+
+        assert_eq!(
+            controller.packet().j_rgb_1.color,
+            Color::new(0x10, 0x20, 0x30)
+        );
+        assert_eq!(
+            controller.packet().j_rgb_1.effect,
+            MsiMode::Breathing.encode()
+        );
+        assert_eq!(controller.packet().j_rgb_1.speed(), Ok(MsiSpeed::High));
+        assert_eq!(
+            controller.packet().j_rgb_1.brightness(),
+            Ok(MsiBrightness::Level70)
+        );
+        assert_eq!(controller.packet().save_data, 1);
     }
 
     #[test]
