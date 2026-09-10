@@ -1,3 +1,5 @@
+#[allow(dead_code)]
+mod controller;
 mod error;
 mod hid;
 #[allow(dead_code)]
