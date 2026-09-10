@@ -1,5 +1,6 @@
 #[allow(dead_code)]
 mod boards;
+mod cli;
 #[allow(dead_code)]
 mod controller;
 mod error;
@@ -7,6 +8,8 @@ mod hid;
 #[allow(dead_code)]
 mod protocol;
 
+use clap::Parser;
+use cli::Cli;
 use error::AppError;
 use hid::open_matching;
 use rusb::Context;
@@ -19,6 +22,12 @@ enum LightMode {
 }
 
 fn main() -> Result<(), AppError> {
+    let cli = Cli::parse();
+    if let Some(output) = cli::render(&cli) {
+        print!("{output}");
+        return Ok(());
+    }
+
     let interface = 0;
     let context = Context::new()?;
     let mut transport = open_matching(&context, interface)?;
