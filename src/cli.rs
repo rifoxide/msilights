@@ -20,6 +20,22 @@ pub struct Cli {
 pub enum Command {
     Zones,
     Effects,
+    All {
+        #[arg(long)]
+        color: String,
+        #[arg(long)]
+        secondary: Option<String>,
+        #[arg(long, default_value = "static")]
+        effect: String,
+        #[arg(long, default_value = "medium")]
+        speed: String,
+        #[arg(long, default_value = "100")]
+        brightness: String,
+        #[arg(long)]
+        save: bool,
+        #[arg(long)]
+        dry_run: bool,
+    },
     Set {
         #[arg(long)]
         zone: String,
@@ -44,6 +60,24 @@ pub fn render(cli: &Cli) -> Option<String> {
     match &cli.command {
         Some(Command::Zones) => Some(render_zones(cli.json, &COMMON_185_CAPABILITIES)),
         Some(Command::Effects) => Some(render_effects(cli.json)),
+        Some(Command::All {
+            color,
+            secondary,
+            effect,
+            speed,
+            brightness,
+            save,
+            dry_run,
+        }) if *dry_run => Some(render_all(
+            cli.json,
+            color,
+            secondary.as_deref(),
+            effect,
+            speed,
+            brightness,
+            *save,
+        )),
+        Some(Command::All { .. }) => None,
         Some(Command::Set {
             zone,
             color,
@@ -85,7 +119,26 @@ fn parse_mode(value: &str) -> Result<MsiMode, String> {
         "static" | "1" => Ok(MsiMode::Static),
         "breathing" | "2" => Ok(MsiMode::Breathing),
         "flashing" | "3" => Ok(MsiMode::Flashing),
+        "double-flashing" | "double_flashing" | "4" => Ok(MsiMode::DoubleFlashing),
+        "lightning" | "5" => Ok(MsiMode::Lightning),
         "meteor" | "7" => Ok(MsiMode::Meteor),
+        "color-ring" | "color_ring" | "15" => Ok(MsiMode::ColorRing),
+        "planetary" | "16" => Ok(MsiMode::Planetary),
+        "double-meteor" | "double_meteor" | "17" => Ok(MsiMode::DoubleMeteor),
+        "energy" | "18" => Ok(MsiMode::Energy),
+        "blink" | "19" => Ok(MsiMode::Blink),
+        "clock" | "20" => Ok(MsiMode::Clock),
+        "color-pulse" | "color_pulse" | "21" => Ok(MsiMode::ColorPulse),
+        "color-shift" | "color_shift" | "22" => Ok(MsiMode::ColorShift),
+        "color-wave" | "color_wave" | "23" => Ok(MsiMode::ColorWave),
+        "marquee" | "24" => Ok(MsiMode::Marquee),
+        "rainbow-wave" | "rainbow_wave" | "26" => Ok(MsiMode::RainbowWave),
+        "visor" | "27" => Ok(MsiMode::Visor),
+        "rainbow-flashing" | "rainbow_flashing" | "29" => Ok(MsiMode::RainbowFlashing),
+        "color-ring-double-flashing" | "color_ring_double_flashing" | "35" => {
+            Ok(MsiMode::ColorRingDoubleFlashing)
+        }
+        "stack" | "36" => Ok(MsiMode::Stack),
         "fire" | "38" => Ok(MsiMode::Fire),
         _ => Err(format!("unsupported effect: {value}")),
     }
@@ -136,6 +189,16 @@ fn controller_zone(zone: &str) -> Result<Zone, String> {
         _ => Err(format!("unsupported zone: {zone}")),
     }
 }
+
+const WRITABLE_ZONES: [Zone; 7] = [
+    Zone::JRgb1,
+    Zone::JRgb2,
+    Zone::JPipe1,
+    Zone::JPipe2,
+    Zone::JRainbow1,
+    Zone::JRainbow2,
+    Zone::OnBoard(0),
+];
 
 #[derive(Clone, Debug)]
 pub struct SetRequest {
@@ -194,6 +257,24 @@ pub fn parse_set_command(command: &Command) -> Result<SetRequest, String> {
     }
 }
 
+fn parse_options(
+    color: &str,
+    secondary: Option<&str>,
+    effect: &str,
+    speed: &str,
+    brightness: &str,
+    save: bool,
+) -> Result<(Color, Color, MsiMode, MsiSpeed, MsiBrightness, bool), String> {
+    Ok((
+        parse_color(color)?,
+        parse_color(secondary.unwrap_or(color))?,
+        parse_mode(effect)?,
+        parse_speed(speed)?,
+        parse_brightness(brightness)?,
+        save,
+    ))
+}
+
 pub fn apply_set_request<T: FeatureReportTransport>(
     controller: &mut MsiController<T>,
     request: &SetRequest,
@@ -213,6 +294,59 @@ pub fn apply_set_request<T: FeatureReportTransport>(
     Ok(())
 }
 
+pub fn apply_all_command<T: FeatureReportTransport>(
+    controller: &mut MsiController<T>,
+    command: &Command,
+) -> Result<(), String> {
+    let Command::All {
+        color,
+        secondary,
+        effect,
+        speed,
+        brightness,
+        save,
+        ..
+    } = command
+    else {
+        return Err("expected all command".into());
+    };
+    let (color, secondary, effect, speed, brightness, save) = parse_options(
+        color,
+        secondary.as_deref(),
+        effect,
+        speed,
+        brightness,
+        *save,
+    )?;
+    apply_all_request(
+        controller, color, secondary, effect, speed, brightness, save,
+    )
+}
+
+fn apply_all_request<T: FeatureReportTransport>(
+    controller: &mut MsiController<T>,
+    color: Color,
+    secondary: Color,
+    effect: MsiMode,
+    speed: MsiSpeed,
+    brightness: MsiBrightness,
+    save: bool,
+) -> Result<(), String> {
+    for zone in WRITABLE_ZONES {
+        let request = SetRequest {
+            zone,
+            primary: color,
+            secondary,
+            effect,
+            speed,
+            brightness,
+            save,
+        };
+        apply_set_request(controller, &request)?;
+    }
+    Ok(())
+}
+
 fn build_set_packet(
     zone: &str,
     color: &str,
@@ -226,6 +360,58 @@ fn build_set_packet(
     let mut controller = MsiController::new(RecordingTransport::default());
     apply_set_request(&mut controller, &request)?;
     Ok(controller.packet().encode())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn render_all(
+    json: bool,
+    color: &str,
+    secondary: Option<&str>,
+    effect: &str,
+    speed: &str,
+    brightness: &str,
+    save: bool,
+) -> String {
+    let result = parse_options(color, secondary, effect, speed, brightness, save).and_then(
+        |(primary, secondary, effect, speed, brightness, save)| {
+            let mut controller = MsiController::new(RecordingTransport::default());
+            apply_all_request(
+                &mut controller,
+                primary,
+                secondary,
+                effect,
+                speed,
+                brightness,
+                save,
+            )?;
+            Ok(controller.packet().encode())
+        },
+    );
+    render_packet(json, result)
+}
+
+fn render_packet(json: bool, result: Result<[u8; FEATURE_PACKET_LEN], String>) -> String {
+    match result {
+        Ok(packet) if json => format!(
+            r#"{{"report_id":{},"length":{},"bytes":"{}"}}\n"#,
+            FEATURE_REPORT_ID,
+            packet.len(),
+            packet
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<String>()
+        ),
+        Ok(packet) => format!(
+            "report_id: {FEATURE_REPORT_ID:#04x}\nlength: {}\nbytes: {}\n",
+            packet.len(),
+            packet
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<Vec<_>>()
+                .join(" ")
+        ),
+        Err(error) => format!("error: {error}\n"),
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -355,6 +541,35 @@ mod tests {
     }
 
     #[test]
+    fn parses_all_advertised_effects() {
+        for (value, expected) in [
+            ("double-flashing", MsiMode::DoubleFlashing),
+            ("lightning", MsiMode::Lightning),
+            ("color-ring", MsiMode::ColorRing),
+            ("planetary", MsiMode::Planetary),
+            ("double-meteor", MsiMode::DoubleMeteor),
+            ("energy", MsiMode::Energy),
+            ("blink", MsiMode::Blink),
+            ("clock", MsiMode::Clock),
+            ("color-pulse", MsiMode::ColorPulse),
+            ("color-shift", MsiMode::ColorShift),
+            ("color-wave", MsiMode::ColorWave),
+            ("marquee", MsiMode::Marquee),
+            ("rainbow-wave", MsiMode::RainbowWave),
+            ("visor", MsiMode::Visor),
+            ("rainbow-flashing", MsiMode::RainbowFlashing),
+            (
+                "color-ring-double-flashing",
+                MsiMode::ColorRingDoubleFlashing,
+            ),
+            ("stack", MsiMode::Stack),
+            ("fire", MsiMode::Fire),
+        ] {
+            assert_eq!(parse_mode(value), Ok(expected));
+        }
+    }
+
+    #[test]
     fn parses_and_applies_set_request_without_hardware() {
         let command = Cli::try_parse_from([
             "msilights",
@@ -393,6 +608,64 @@ mod tests {
             Ok(MsiBrightness::Level70)
         );
         assert_eq!(controller.packet().save_data, 1);
+    }
+
+    #[test]
+    fn applies_all_command_to_every_writable_zone() {
+        let command = Cli::try_parse_from([
+            "msilights",
+            "all",
+            "--color",
+            "FF3600",
+            "--effect",
+            "static",
+            "--brightness",
+            "90",
+            "--dry-run",
+        ])
+        .unwrap()
+        .command
+        .unwrap();
+        let mut controller = MsiController::new(RecordingTransport::default());
+        apply_all_command(&mut controller, &command).unwrap();
+
+        assert_eq!(
+            controller.packet().j_rgb_1.color,
+            Color::new(0xff, 0x36, 0x00)
+        );
+        assert_eq!(
+            controller.packet().j_rgb_2.color,
+            Color::new(0xff, 0x36, 0x00)
+        );
+        assert_eq!(
+            controller.packet().j_pipe_1.color,
+            Color::new(0xff, 0x36, 0x00)
+        );
+        assert_eq!(
+            controller.packet().j_pipe_2.color,
+            Color::new(0xff, 0x36, 0x00)
+        );
+        assert_eq!(
+            controller.packet().j_rainbow_1.zone.color,
+            Color::new(0xff, 0x36, 0x00)
+        );
+        assert_eq!(
+            controller.packet().j_rainbow_2.zone.color,
+            Color::new(0xff, 0x36, 0x00)
+        );
+        assert_eq!(
+            controller.packet().on_board_led[0].color,
+            Color::new(0xff, 0x36, 0x00)
+        );
+    }
+
+    #[test]
+    fn renders_all_dry_run_packet() {
+        let cli =
+            Cli::try_parse_from(["msilights", "all", "--color", "FF3600", "--dry-run"]).unwrap();
+        let output = render(&cli).unwrap();
+        assert!(output.contains("report_id: 0x52"));
+        assert!(output.contains("length: 185"));
     }
 
     #[test]
