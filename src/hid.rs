@@ -8,6 +8,7 @@ pub const MSI_PRODUCT_ID: u16 = 0x0076;
 #[allow(dead_code)]
 pub trait FeatureReportTransport {
     fn send_feature_report(&mut self, report_id: u8, data: &[u8]) -> Result<usize, AppError>;
+    fn read_feature_report(&mut self, report_id: u8, length: usize) -> Result<Vec<u8>, AppError>;
 }
 
 const HID_SET_REPORT: u8 = 0x09;
@@ -63,6 +64,22 @@ impl HidTransport {
         })
     }
 
+    pub fn read_feature_report(&mut self, report_id: u8, length: usize) -> rusb::Result<Vec<u8>> {
+        let request_type =
+            rusb::request_type(Direction::In, RequestType::Class, Recipient::Interface);
+        let value = ((HID_FEATURE_REPORT_TYPE as u16) << 8) | u16::from(report_id);
+        let mut data = vec![0; length];
+        self.handle.read_control(
+            request_type,
+            0x01,
+            value,
+            u16::from(self.interface),
+            &mut data,
+            CONTROL_TRANSFER_TIMEOUT,
+        )?;
+        Ok(data)
+    }
+
     pub fn send_feature_report(&mut self, report_id: u8, data: &[u8]) -> rusb::Result<usize> {
         let request_type =
             rusb::request_type(Direction::Out, RequestType::Class, Recipient::Interface);
@@ -88,6 +105,11 @@ impl FeatureReportTransport for HidTransport {
         self.send_feature_report(report_id, data)
             .map_err(AppError::from)
     }
+
+    fn read_feature_report(&mut self, report_id: u8, length: usize) -> Result<Vec<u8>, AppError> {
+        self.read_feature_report(report_id, length)
+            .map_err(AppError::from)
+    }
 }
 
 impl Drop for HidTransport {
@@ -103,6 +125,7 @@ impl Drop for HidTransport {
 #[derive(Debug, Default)]
 pub struct RecordingTransport {
     reports: Vec<(u8, Vec<u8>)>,
+    read_data: Option<Vec<u8>>,
     failure: Option<AppError>,
 }
 
@@ -111,7 +134,16 @@ impl RecordingTransport {
     pub fn with_failure(failure: AppError) -> Self {
         Self {
             reports: Vec::new(),
+            read_data: None,
             failure: Some(failure),
+        }
+    }
+
+    pub fn with_read_data(read_data: Vec<u8>) -> Self {
+        Self {
+            reports: Vec::new(),
+            read_data: Some(read_data),
+            failure: None,
         }
     }
 
@@ -136,6 +168,22 @@ impl FeatureReportTransport for RecordingTransport {
         }
         self.reports.push((report_id, data.to_vec()));
         Ok(data.len())
+    }
+
+    fn read_feature_report(&mut self, _report_id: u8, _length: usize) -> Result<Vec<u8>, AppError> {
+        if let Some(failure) = &self.failure {
+            return Err(match failure {
+                AppError::Usb(error) => AppError::Usb(*error),
+                AppError::DeviceNotFound {
+                    vendor_id,
+                    product_id,
+                } => AppError::DeviceNotFound {
+                    vendor_id: *vendor_id,
+                    product_id: *product_id,
+                },
+            });
+        }
+        Ok(self.read_data.clone().unwrap_or_default())
     }
 }
 

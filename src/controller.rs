@@ -102,6 +102,22 @@ impl<T: FeatureReportTransport> MsiController<T> {
         self.packet.save_data = u8::from(save);
     }
 
+    pub fn read_current(&mut self) -> Result<(), ControllerError> {
+        let bytes = self
+            .transport
+            .read_feature_report(FEATURE_REPORT_ID, FEATURE_PACKET_LEN)?;
+        self.packet = FeaturePacket185::decode(&bytes)?;
+        Ok(())
+    }
+
+    pub fn update(&mut self) -> Result<(), ControllerError> {
+        let desired = self.packet;
+        self.read_current()?;
+        self.send_current()?;
+        self.packet = desired;
+        self.send_current()
+    }
+
     pub fn send_current(&mut self) -> Result<(), ControllerError> {
         let bytes = self.packet.encode();
         let written = self
