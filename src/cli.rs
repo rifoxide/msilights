@@ -8,7 +8,11 @@ use crate::protocol::{
 };
 
 #[derive(Debug, Parser)]
-#[command(name = "msilights")]
+#[command(
+    name = "msilights",
+    about = "Control MSI Mystic Light USB lighting devices",
+    long_about = "Control MSI Mystic Light USB lighting devices over HID feature reports.\n\nUse --dry-run to inspect a packet without connecting to hardware. Hardware commands require the intended MSI device and suitable USB permissions."
+)]
 pub struct Cli {
     #[arg(long, global = true)]
     pub json: bool,
@@ -18,40 +22,75 @@ pub struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub enum Command {
+    #[command(about = "List zones known for the common MSI 185-byte controller")]
     Zones,
+    #[command(about = "List supported normal lighting effects")]
     Effects,
-    All {
+    #[command(
+        about = "Apply one lighting configuration to every writable zone",
+        long_about = "Apply the same color, effect, speed, and brightness to all currently writable zones: JRGB1, JRGB2, PIPE1, PIPE2, JRAINBOW1, JRAINBOW2, and ONBOARD. Use --dry-run to generate the 185-byte report without changing hardware."
+    )]
+    #[command(name = "setall")]
+    SetAll {
         #[arg(long)]
         color: String,
-        #[arg(long)]
+        #[arg(long, help = "Secondary RGB color; defaults to the primary color")]
         secondary: Option<String>,
-        #[arg(long, default_value = "static")]
+        #[arg(
+            long,
+            default_value = "static",
+            help = "Lighting effect name or numeric value"
+        )]
         effect: String,
-        #[arg(long, default_value = "medium")]
+        #[arg(
+            long,
+            default_value = "medium",
+            help = "Effect speed: low, medium, or high"
+        )]
         speed: String,
-        #[arg(long, default_value = "100")]
+        #[arg(
+            long,
+            default_value = "100",
+            help = "Brightness percentage: 0, 10, ..., 100"
+        )]
         brightness: String,
-        #[arg(long)]
+        #[arg(long, help = "Save the configuration to device memory")]
         save: bool,
-        #[arg(long)]
+        #[arg(long, help = "Print the packet without connecting to hardware")]
         dry_run: bool,
     },
+    #[command(
+        about = "Apply a lighting configuration to one writable zone",
+        long_about = "Apply a color, effect, speed, and brightness to one writable zone. Use --dry-run to generate the 185-byte report without changing hardware."
+    )]
     Set {
-        #[arg(long)]
+        #[arg(long, help = "Writable zone name, for example JRGB1 or ONBOARD")]
         zone: String,
-        #[arg(long)]
+        #[arg(long, help = "Primary RGB color as RRGGBB or #RRGGBB")]
         color: String,
-        #[arg(long)]
+        #[arg(long, help = "Secondary RGB color; defaults to the primary color")]
         secondary: Option<String>,
-        #[arg(long, default_value = "static")]
+        #[arg(
+            long,
+            default_value = "static",
+            help = "Lighting effect name or numeric value"
+        )]
         effect: String,
-        #[arg(long, default_value = "medium")]
+        #[arg(
+            long,
+            default_value = "medium",
+            help = "Effect speed: low, medium, or high"
+        )]
         speed: String,
-        #[arg(long, default_value = "100")]
+        #[arg(
+            long,
+            default_value = "100",
+            help = "Brightness percentage: 0, 10, ..., 100"
+        )]
         brightness: String,
-        #[arg(long)]
+        #[arg(long, help = "Save the configuration to device memory")]
         save: bool,
-        #[arg(long)]
+        #[arg(long, help = "Print the packet without connecting to hardware")]
         dry_run: bool,
     },
 }
@@ -60,7 +99,7 @@ pub fn render(cli: &Cli) -> Option<String> {
     match &cli.command {
         Some(Command::Zones) => Some(render_zones(cli.json, &COMMON_185_CAPABILITIES)),
         Some(Command::Effects) => Some(render_effects(cli.json)),
-        Some(Command::All {
+        Some(Command::SetAll {
             color,
             secondary,
             effect,
@@ -77,7 +116,7 @@ pub fn render(cli: &Cli) -> Option<String> {
             brightness,
             *save,
         )),
-        Some(Command::All { .. }) => None,
+        Some(Command::SetAll { .. }) => None,
         Some(Command::Set {
             zone,
             color,
@@ -298,7 +337,7 @@ pub fn apply_all_command<T: FeatureReportTransport>(
     controller: &mut MsiController<T>,
     command: &Command,
 ) -> Result<(), String> {
-    let Command::All {
+    let Command::SetAll {
         color,
         secondary,
         effect,
@@ -308,7 +347,7 @@ pub fn apply_all_command<T: FeatureReportTransport>(
         ..
     } = command
     else {
-        return Err("expected all command".into());
+        return Err("expected setall command".into());
     };
     let (color, secondary, effect, speed, brightness, save) = parse_options(
         color,
@@ -614,7 +653,7 @@ mod tests {
     fn applies_all_command_to_every_writable_zone() {
         let command = Cli::try_parse_from([
             "msilights",
-            "all",
+            "setall",
             "--color",
             "FF3600",
             "--effect",
@@ -662,7 +701,7 @@ mod tests {
     #[test]
     fn renders_all_dry_run_packet() {
         let cli =
-            Cli::try_parse_from(["msilights", "all", "--color", "FF3600", "--dry-run"]).unwrap();
+            Cli::try_parse_from(["msilights", "setall", "--color", "FF3600", "--dry-run"]).unwrap();
         let output = render(&cli).unwrap();
         assert!(output.contains("report_id: 0x52"));
         assert!(output.contains("length: 185"));

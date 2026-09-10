@@ -8,7 +8,7 @@ mod hid;
 #[allow(dead_code)]
 mod protocol;
 
-use clap::Parser;
+use clap::{CommandFactory, Parser};
 use cli::{Cli, Command, apply_set_request, parse_set_command};
 use controller::MsiController;
 use error::AppError;
@@ -31,7 +31,7 @@ fn main() -> Result<(), AppError> {
         return Ok(());
     }
 
-    if let Some(Command::All { dry_run: false, .. }) = &cli.command {
+    if let Some(Command::SetAll { dry_run: false, .. }) = &cli.command {
         let context = Context::new()?;
         let transport = open_matching(&context, 0)?;
         let mut controller = MsiController::new(transport);
@@ -48,7 +48,10 @@ fn main() -> Result<(), AppError> {
         return Ok(());
     }
 
-    Err(AppError::Cli(
-        "a command is required; use --help for usage".into(),
-    ))
+    if cli.command.is_none() {
+        println!("{}", Cli::command().render_help());
+        return Ok(());
+    }
+
+    Ok(())
 }
