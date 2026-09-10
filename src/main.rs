@@ -1,4 +1,6 @@
 #[allow(dead_code)]
+mod boards;
+#[allow(dead_code)]
 mod controller;
 mod error;
 mod hid;
