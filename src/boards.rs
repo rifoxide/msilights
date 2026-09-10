@@ -97,6 +97,17 @@ pub fn capabilities_for_product(product_id: u16) -> Option<&'static BoardCapabil
     (product_id == COMMON_185_CAPABILITIES.product_id).then_some(&COMMON_185_CAPABILITIES)
 }
 
+pub fn resolve_product_id(usb_product_id: u16, serial: &str) -> Option<u16> {
+    if usb_product_id != COMMON_185_CAPABILITIES.product_id {
+        return Some(usb_product_id);
+    }
+    u16::from_str_radix(serial.get(..4)?, 16).ok()
+}
+
+pub const fn supports_mixed_mode(product_id: u16) -> bool {
+    product_id >= 0x7d03
+}
+
 pub fn zone_from_name(name: &str) -> Option<MsiZone> {
     match name.to_ascii_uppercase().as_str() {
         "JRGB1" => Some(MsiZone::JRgb1),
@@ -138,5 +149,18 @@ mod tests {
         assert_eq!(capabilities_for_product(0x1234), None);
         assert_eq!(COMMON_185_CAPABILITIES.direct_mode, DirectMode::Disabled);
         assert_eq!(COMMON_185_CAPABILITIES.max_direct_leds, 0);
+    }
+
+    #[test]
+    fn resolves_common_product_id_from_serial_prefix() {
+        assert_eq!(resolve_product_id(0x0076, "7E12-BOARD"), Some(0x7e12));
+        assert_eq!(resolve_product_id(0x7e12, "0000"), Some(0x7e12));
+        assert_eq!(resolve_product_id(0x0076, "bad"), None);
+    }
+
+    #[test]
+    fn identifies_mixed_mode_products() {
+        assert!(!supports_mixed_mode(0x7d02));
+        assert!(supports_mixed_mode(0x7d03));
     }
 }
