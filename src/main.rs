@@ -1,8 +1,12 @@
+#[allow(dead_code)]
+mod protocol;
+
 use rusb::{Context, DeviceHandle, Direction, Recipient, RequestType, UsbContext};
 
 const HID_SET_REPORT: u8 = 0x09;
 
 #[derive(Debug)]
+#[allow(dead_code)]
 enum ReportType {
     Input = 1,
     Output = 2,
@@ -36,6 +40,7 @@ fn send_hid_set_report(
     )
 }
 
+#[allow(dead_code)]
 enum LightMode {
     Off = 0,
     Stedy = 1,
@@ -72,7 +77,7 @@ fn main() -> rusb::Result<()> {
             println!("device claimed!");
 
             let report_id = 82;
-            let mut report_data = [
+            let report_data = [
                 0x52, 0x1, 0x35, 0xff, 0x23, 0x9, 0x35, 0xff, 0x23, 0x80, 0x0, 0x1a, 0xff, 0x0,
                 0x0, 0x28, 0x0, 0xff, 0x0, 0x80, 0x0, 0x1a, 0xff, 0x0, 0x0, 0x28, 0x0, 0xff, 0x0,
                 0x80, 0x0, //
