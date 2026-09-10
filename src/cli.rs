@@ -1,6 +1,11 @@
 use clap::{Parser, Subcommand};
 
-use crate::boards::{BoardCapabilities, COMMON_185_CAPABILITIES};
+use crate::boards::{BoardCapabilities, COMMON_185_CAPABILITIES, zone_from_name};
+use crate::controller::{MsiController, Zone};
+use crate::hid::RecordingTransport;
+use crate::protocol::{
+    Color, FEATURE_PACKET_LEN, FEATURE_REPORT_ID, MsiBrightness, MsiMode, MsiSpeed,
+};
 
 #[derive(Debug, Parser)]
 #[command(name = "msilights")]
@@ -15,13 +20,184 @@ pub struct Cli {
 pub enum Command {
     Zones,
     Effects,
+    Set {
+        #[arg(long)]
+        zone: String,
+        #[arg(long)]
+        color: String,
+        #[arg(long)]
+        secondary: Option<String>,
+        #[arg(long, default_value = "static")]
+        effect: String,
+        #[arg(long, default_value = "medium")]
+        speed: String,
+        #[arg(long, default_value = "100")]
+        brightness: String,
+        #[arg(long)]
+        save: bool,
+        #[arg(long)]
+        dry_run: bool,
+    },
 }
 
 pub fn render(cli: &Cli) -> Option<String> {
-    match cli.command {
+    match &cli.command {
         Some(Command::Zones) => Some(render_zones(cli.json, &COMMON_185_CAPABILITIES)),
         Some(Command::Effects) => Some(render_effects(cli.json)),
+        Some(Command::Set {
+            zone,
+            color,
+            secondary,
+            effect,
+            speed,
+            brightness,
+            save,
+            dry_run,
+        }) if *dry_run => Some(render_set(
+            cli.json,
+            zone,
+            color,
+            secondary.as_deref(),
+            effect,
+            speed,
+            brightness,
+            *save,
+        )),
+        Some(Command::Set { .. }) => {
+            Some("set without --dry-run is not wired to hardware yet\n".into())
+        }
         None => None,
+    }
+}
+
+fn parse_color(value: &str) -> Result<Color, String> {
+    let value = value.strip_prefix('#').unwrap_or(value);
+    if value.len() != 6 {
+        return Err("color must be six hexadecimal digits".into());
+    }
+    let bytes = (0..3)
+        .map(|index| u8::from_str_radix(&value[index * 2..index * 2 + 2], 16))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|_| "color must be hexadecimal".to_string())?;
+    Ok(Color::new(bytes[0], bytes[1], bytes[2]))
+}
+
+fn parse_mode(value: &str) -> Result<MsiMode, String> {
+    match value.to_ascii_lowercase().as_str() {
+        "static" | "1" => Ok(MsiMode::Static),
+        "breathing" | "2" => Ok(MsiMode::Breathing),
+        "flashing" | "3" => Ok(MsiMode::Flashing),
+        "meteor" | "7" => Ok(MsiMode::Meteor),
+        "fire" | "38" => Ok(MsiMode::Fire),
+        _ => Err(format!("unsupported effect: {value}")),
+    }
+}
+
+fn parse_speed(value: &str) -> Result<MsiSpeed, String> {
+    match value.to_ascii_lowercase().as_str() {
+        "low" | "0" => Ok(MsiSpeed::Low),
+        "medium" | "1" => Ok(MsiSpeed::Medium),
+        "high" | "2" => Ok(MsiSpeed::High),
+        _ => Err(format!("unsupported speed: {value}")),
+    }
+}
+
+fn parse_brightness(value: &str) -> Result<MsiBrightness, String> {
+    match value.to_ascii_lowercase().as_str() {
+        "0" | "off" => Ok(MsiBrightness::Off),
+        "10" | "level10" => Ok(MsiBrightness::Level10),
+        "20" | "level20" => Ok(MsiBrightness::Level20),
+        "30" | "level30" => Ok(MsiBrightness::Level30),
+        "40" | "level40" => Ok(MsiBrightness::Level40),
+        "50" | "level50" => Ok(MsiBrightness::Level50),
+        "60" | "level60" => Ok(MsiBrightness::Level60),
+        "70" | "level70" => Ok(MsiBrightness::Level70),
+        "80" | "level80" => Ok(MsiBrightness::Level80),
+        "90" | "level90" => Ok(MsiBrightness::Level90),
+        "100" | "level100" => Ok(MsiBrightness::Level100),
+        _ => Err(format!("unsupported brightness: {value}")),
+    }
+}
+
+fn controller_zone(zone: &str) -> Result<Zone, String> {
+    match zone_from_name(zone) {
+        Some(crate::boards::MsiZone::JRgb1) => Ok(Zone::JRgb1),
+        Some(crate::boards::MsiZone::JRgb2) => Ok(Zone::JRgb2),
+        Some(crate::boards::MsiZone::JPipe1) => Ok(Zone::JPipe1),
+        Some(crate::boards::MsiZone::JPipe2) => Ok(Zone::JPipe2),
+        Some(crate::boards::MsiZone::JRainbow1) => Ok(Zone::JRainbow1),
+        Some(crate::boards::MsiZone::JRainbow2) => Ok(Zone::JRainbow2),
+        Some(crate::boards::MsiZone::JCorsair) => {
+            Err("JCORSAIR mapping is not yet supported".into())
+        }
+        Some(crate::boards::MsiZone::JRainbow3) => {
+            Err("JRAINBOW3 mapping is not yet supported".into())
+        }
+        Some(crate::boards::MsiZone::OnBoardLed0) => Ok(Zone::OnBoard(0)),
+        None => Err(format!("unknown zone: {zone}")),
+        _ => Err(format!("unsupported zone: {zone}")),
+    }
+}
+
+fn build_set_packet(
+    zone: &str,
+    color: &str,
+    secondary: Option<&str>,
+    effect: &str,
+    speed: &str,
+    brightness: &str,
+    save: bool,
+) -> Result<[u8; FEATURE_PACKET_LEN], String> {
+    let zone = controller_zone(zone)?;
+    let primary = parse_color(color)?;
+    let secondary = parse_color(secondary.unwrap_or(color))?;
+    let mut controller = MsiController::new(RecordingTransport::default());
+    controller
+        .set_colors(zone, primary, secondary)
+        .map_err(|error| error.to_string())?;
+    controller
+        .set_settings(
+            zone,
+            parse_mode(effect)?,
+            parse_speed(speed)?,
+            parse_brightness(brightness)?,
+        )
+        .map_err(|error| error.to_string())?;
+    controller.set_save(save);
+    Ok(controller.packet().encode())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn render_set(
+    json: bool,
+    zone: &str,
+    color: &str,
+    secondary: Option<&str>,
+    effect: &str,
+    speed: &str,
+    brightness: &str,
+    save: bool,
+) -> String {
+    match build_set_packet(zone, color, secondary, effect, speed, brightness, save) {
+        Ok(packet) if json => format!(
+            r#"{{"report_id":{},"length":{},"bytes":"{}"}}\n"#,
+            FEATURE_REPORT_ID,
+            packet.len(),
+            packet
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<String>()
+        ),
+        Ok(packet) => format!(
+            "report_id: {FEATURE_REPORT_ID:#04x}\nlength: {}\nbytes: {}\n",
+            packet.len(),
+            packet
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<Vec<_>>()
+                .join(" ")
+        ),
+        Err(error) => format!("error: {error}\n"),
     }
 }
 
