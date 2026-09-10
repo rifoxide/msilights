@@ -35,32 +35,32 @@ No ordinary test command writes to RGB hardware.
 Print the general help:
 
 ```sh
-cargo run -- --help
+msilights --help
 ```
 
 Running without a command also prints help:
 
 ```sh
-cargo run --
+msilights
 ```
 
 List known zones:
 
 ```sh
-cargo run -- zones
+msilights zones
 ```
 
 List supported normal effects:
 
 ```sh
-cargo run -- effects
+msilights effects
 ```
 
 Use JSON output for metadata commands:
 
 ```sh
-cargo run -- --json zones
-cargo run -- --json effects
+msilights --json zones
+msilights --json effects
 ```
 
 ### Set one zone
@@ -68,7 +68,7 @@ cargo run -- --json effects
 Apply a temporary static orange color to one zone:
 
 ```sh
-cargo run -- set \
+msilights set \
   --zone JRGB1 \
   --color FF3600 \
   --effect static \
@@ -78,7 +78,7 @@ cargo run -- set \
 The color may also include a leading `#`:
 
 ```sh
-cargo run -- set --zone JRGB1 --color '#FF3600'
+msilights set --zone JRGB1 --color '#FF3600'
 ```
 
 Available writable zone names are currently:
@@ -96,7 +96,7 @@ Available writable zone names are currently:
 Apply one configuration to all currently writable zones:
 
 ```sh
-cargo run -- setall \
+msilights setall \
   --color FF3600 \
   --effect static \
   --brightness 90
@@ -109,13 +109,13 @@ cargo run -- setall \
 By default, the setting is applied without requesting that the device save it to memory:
 
 ```sh
-cargo run -- setall --color FF3600 --effect static --brightness 90
+msilights setall --color FF3600 --effect static --brightness 90
 ```
 
 Add `--save` to request persistent storage:
 
 ```sh
-cargo run -- setall --color FF3600 --effect static --brightness 90 --save
+msilights setall --color FF3600 --effect static --brightness 90 --save
 ```
 
 The `--save` flag controls the protocol save byte; it does not change the temporary hardware update sequence.
@@ -125,11 +125,11 @@ The `--save` flag controls the protocol save byte; it does not change the tempor
 Effects can be specified by name or supported numeric value. Examples include:
 
 ```sh
-cargo run -- setall --color FF3600 --effect breathing --speed high --brightness 70
-cargo run -- setall --color FF3600 --secondary 0000FF --effect color-wave
+msilights setall --color FF3600 --effect breathing --speed high --brightness 70
+msilights setall --color FF3600 --secondary 0000FF --effect color-wave
 ```
 
-Use `cargo run -- effects` for the complete effect list.
+Use `msilights effects` for the complete effect list.
 
 Speed values:
 
@@ -144,7 +144,7 @@ Brightness values are percentage levels from `0` through `100` in steps of `10`,
 `--dry-run` validates the request and prints the generated 185-byte feature packet without opening the USB device or changing RGB state:
 
 ```sh
-cargo run -- setall \
+msilights setall \
   --color FF3600 \
   --effect static \
   --brightness 90 \
@@ -154,7 +154,7 @@ cargo run -- setall \
 It can be combined with JSON output:
 
 ```sh
-cargo run -- --json setall --color FF3600 --dry-run
+msilights --json setall --color FF3600 --dry-run
 ```
 
 Dry-run output includes the report ID, packet length, and encoded bytes.
