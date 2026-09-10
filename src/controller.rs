@@ -2,7 +2,7 @@ use crate::error::AppError;
 use crate::hid::FeatureReportTransport;
 use crate::protocol::{
     Color, FEATURE_PACKET_LEN, FEATURE_REPORT_ID, FeaturePacket185, MsiBrightness, MsiMode,
-    MsiSpeed, ProtocolError, ZoneData,
+    MsiSpeed, ProtocolError, SyncSetting, ZoneData,
 };
 use std::fmt;
 
@@ -102,6 +102,43 @@ impl<T: FeatureReportTransport> MsiController<T> {
         self.packet.save_data = u8::from(save);
     }
 
+    pub fn set_jrgb_sync(&mut self, zone: Zone, enabled: bool) -> Result<(), ControllerError> {
+        self.zone_mut(zone)?.set_jrgb_sync_enabled(enabled);
+        Ok(())
+    }
+
+    pub fn set_color_sync(
+        &mut self,
+        zone: Zone,
+        setting: SyncSetting,
+        enabled: bool,
+    ) -> Result<(), ControllerError> {
+        self.zone_mut(zone)?.set_sync_enabled(setting, enabled);
+        Ok(())
+    }
+
+    pub fn set_custom_color(&mut self, zone: Zone, enabled: bool) -> Result<(), ControllerError> {
+        self.zone_mut(zone)?.set_custom_color_enabled(enabled);
+        Ok(())
+    }
+
+    pub fn set_rainbow_cycle(
+        &mut self,
+        zone: Zone,
+        cycle_or_led_count: u8,
+    ) -> Result<(), ControllerError> {
+        match zone {
+            Zone::JRainbow1 => self.packet.j_rainbow_1.cycle_or_led_count = cycle_or_led_count,
+            Zone::JRainbow2 => self.packet.j_rainbow_2.cycle_or_led_count = cycle_or_led_count,
+            _ => return Err(ControllerError::InvalidZone(zone)),
+        }
+        Ok(())
+    }
+
+    pub fn set_corsair_quantity(&mut self, quantity: u8) {
+        self.packet.j_corsair.quantity = quantity;
+    }
+
     pub fn read_current(&mut self) -> Result<(), ControllerError> {
         let bytes = self
             .transport
@@ -193,6 +230,42 @@ mod tests {
         assert!(matches!(
             controller.set_colors(Zone::OnBoard(10), Color::default(), Color::default()),
             Err(ControllerError::InvalidOnBoardIndex(10))
+        ));
+    }
+
+    #[test]
+    fn controller_updates_sync_flags_without_losing_other_bits() {
+        let mut controller = MsiController::new(RecordingTransport::default());
+        controller
+            .set_jrgb_sync(Zone::JRgb1, true)
+            .expect("valid zone");
+        controller
+            .set_color_sync(Zone::JRgb1, SyncSetting::Jpipe2, true)
+            .expect("valid zone");
+        controller
+            .set_custom_color(Zone::JRgb1, true)
+            .expect("valid zone");
+
+        let zone = &controller.packet().j_rgb_1;
+        assert!(zone.jrgb_sync_enabled());
+        assert!(zone.sync_enabled(SyncSetting::Jpipe2));
+        assert!(zone.custom_color_enabled());
+        assert_eq!(
+            FeaturePacket185::decode(&controller.packet().encode()),
+            Ok(*controller.packet())
+        );
+    }
+
+    #[test]
+    fn controller_limits_rainbow_cycle_to_rainbow_zones() {
+        let mut controller = MsiController::new(RecordingTransport::default());
+        controller
+            .set_rainbow_cycle(Zone::JRainbow2, 40)
+            .expect("valid zone");
+        assert_eq!(controller.packet().j_rainbow_2.cycle_or_led_count, 40);
+        assert!(matches!(
+            controller.set_rainbow_cycle(Zone::JRgb1, 40),
+            Err(ControllerError::InvalidZone(Zone::JRgb1))
         ));
     }
 }
