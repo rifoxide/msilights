@@ -63,9 +63,7 @@ pub fn render(cli: &Cli) -> Option<String> {
             brightness,
             *save,
         )),
-        Some(Command::Set { .. }) => {
-            Some("set without --dry-run is not wired to hardware yet\n".into())
-        }
+        Some(Command::Set { .. }) => None,
         None => None,
     }
 }

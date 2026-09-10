@@ -15,13 +15,6 @@ use error::AppError;
 use hid::open_matching;
 use rusb::Context;
 
-#[allow(dead_code)]
-enum LightMode {
-    Off = 0,
-    Stedy = 1,
-    Metro = 7,
-}
-
 fn main() -> Result<(), AppError> {
     let cli = Cli::parse();
     if let Some(Command::Set { dry_run: false, .. }) = &cli.command {
