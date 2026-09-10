@@ -1,3 +1,4 @@
+use crate::boards::{BoardCapabilities, MsiZone};
 use crate::error::AppError;
 use crate::hid::FeatureReportTransport;
 use crate::protocol::{
@@ -58,13 +59,34 @@ impl From<AppError> for ControllerError {
 pub struct MsiController<T> {
     transport: T,
     packet: FeaturePacket185,
+    capabilities: BoardCapabilities,
+}
+
+impl Zone {
+    fn to_msi_zone(self) -> MsiZone {
+        match self {
+            Self::JRgb1 => MsiZone::JRgb1,
+            Self::JRgb2 => MsiZone::JRgb2,
+            Self::JPipe1 => MsiZone::JPipe1,
+            Self::JPipe2 => MsiZone::JPipe2,
+            Self::JRainbow1 => MsiZone::JRainbow1,
+            Self::JRainbow2 => MsiZone::JRainbow2,
+            Self::JCorsairOuter => MsiZone::JCorsairOuterLl120,
+            Self::OnBoard(_) => MsiZone::OnBoardLed0,
+        }
+    }
 }
 
 impl<T: FeatureReportTransport> MsiController<T> {
     pub fn new(transport: T) -> Self {
+        Self::with_capabilities(transport, crate::boards::COMMON_185_CAPABILITIES)
+    }
+
+    pub fn with_capabilities(transport: T, capabilities: BoardCapabilities) -> Self {
         Self {
             transport,
             packet: FeaturePacket185::default(),
+            capabilities,
         }
     }
 
@@ -170,6 +192,9 @@ impl<T: FeatureReportTransport> MsiController<T> {
     }
 
     fn zone_mut(&mut self, zone: Zone) -> Result<&mut ZoneData, ControllerError> {
+        if !self.capabilities.supports_zone(zone.to_msi_zone()) {
+            return Err(ControllerError::InvalidZone(zone));
+        }
         match zone {
             Zone::JRgb1 => Ok(&mut self.packet.j_rgb_1),
             Zone::JPipe1 => Ok(&mut self.packet.j_pipe_1),

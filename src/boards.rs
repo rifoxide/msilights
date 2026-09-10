@@ -68,6 +68,12 @@ pub struct BoardCapabilities {
     pub max_direct_leds: u16,
 }
 
+impl BoardCapabilities {
+    pub fn supports_zone(&self, zone: MsiZone) -> bool {
+        self.zones.contains(&zone)
+    }
+}
+
 pub const COMMON_185_ZONES: &[MsiZone] = &[
     MsiZone::JRgb1,
     MsiZone::JRgb2,
