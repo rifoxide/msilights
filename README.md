@@ -167,6 +167,12 @@ Dry-run output includes the report ID, packet length, and encoded bytes.
 - Unsupported zones and invalid colors, effects, speeds, or brightness values are rejected before a report is sent.
 - Hardware validation is intentionally opt-in; `cargo test` uses mock transports.
 
+## Tested hardware
+
+The current implementation has been tested on:
+
+- MSI B650M GAMING PLUS WIFI
+
 ## Project status
 
 Implemented:
